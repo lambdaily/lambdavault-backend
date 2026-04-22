@@ -1,0 +1,11 @@
+.git
+.gitignore
+mobile
+bin
+build
+coverage.out
+coverage.html
+.env
+.env.*
+.DS_Store
+data

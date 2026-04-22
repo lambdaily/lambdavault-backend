@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [[ -h "$SCRIPT_PATH" ]]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
+  SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+  if [[ "$SCRIPT_PATH" != /* ]]; then
+    SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
+  fi
+done
+ROOT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
+APP_PORT="${APP_PORT:-8081}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  lambdavault run <device> [port]
+  lambdavault set-password <email> [new_password]
+
+Devices:
+  macos
+  ios
+  android
+
+Examples:
+  lambdavault run macos
+  lambdavault run macos 8081
+  APP_PORT=8082 lambdavault run macos
+  lambdavault set-password pablo.espinoza.mail@gmail.com
+EOF
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+validate_port() {
+  local port="$1"
+
+  if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+    echo "Invalid port: $port" >&2
+    exit 1
+  fi
+
+  if ((port < 1 || port > 65535)); then
+    echo "Port out of range (1-65535): $port" >&2
+    exit 1
+  fi
+}
+
+wait_for_backend() {
+  local retries=30
+  local delay=1
+
+  for ((i = 1; i <= retries; i++)); do
+    if nc -z localhost "$APP_PORT" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "$delay"
+  done
+
+  return 1
+}
+
+run_all() {
+  local device="$1"
+  local backend_pid=""
+
+  cleanup() {
+    if [[ -n "$backend_pid" ]] && kill -0 "$backend_pid" >/dev/null 2>&1; then
+      echo "\nStopping backend (PID: $backend_pid)..."
+      kill "$backend_pid" >/dev/null 2>&1 || true
+      wait "$backend_pid" 2>/dev/null || true
+    fi
+  }
+
+  trap cleanup EXIT INT TERM
+
+  echo "Starting backend on port $APP_PORT..."
+  (
+    cd "$ROOT_DIR"
+    APP_PORT="$APP_PORT" make dev
+  ) &
+  backend_pid=$!
+
+  if ! wait_for_backend; then
+    echo "Backend did not become ready on port $APP_PORT." >&2
+    exit 1
+  fi
+
+  echo "Backend ready. Starting Flutter on $device..."
+  (
+    cd "$ROOT_DIR/mobile"
+    flutter run -d "$device"
+  )
+}
+
+set_password() {
+  local email="$1"
+  local new_password="${2:-}"
+  local confirm_password=""
+
+  if [[ -z "$email" ]]; then
+    echo "Email is required." >&2
+    usage
+    exit 1
+  fi
+
+  if [[ -z "$new_password" ]]; then
+    read -r -s -p "New password: " new_password
+    echo
+    read -r -s -p "Confirm password: " confirm_password
+    echo
+
+    if [[ "$new_password" != "$confirm_password" ]]; then
+      echo "Passwords do not match." >&2
+      exit 1
+    fi
+  fi
+
+  if [[ -z "$new_password" ]]; then
+    echo "Password cannot be empty." >&2
+    exit 1
+  fi
+
+  (
+    cd "$ROOT_DIR"
+    LV_NEW_PASSWORD="$new_password" go run ./cmd/tools/set_password --email "$email" --password-env LV_NEW_PASSWORD
+  )
+}
+
+main() {
+  local command="${1:-}"
+  case "$command" in
+    run)
+      require_cmd make
+      require_cmd flutter
+      require_cmd nc
+
+      local device="${2:-}"
+      local port_arg="${3:-}"
+
+      if [[ -n "$port_arg" ]]; then
+        validate_port "$port_arg"
+        APP_PORT="$port_arg"
+      fi
+
+      case "$device" in
+        macos|ios|android)
+          run_all "$device"
+          ;;
+        *)
+          usage
+          exit 1
+          ;;
+      esac
+      ;;
+    set-password)
+      require_cmd go
+      set_password "${2:-}" "${3:-}"
+      ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
