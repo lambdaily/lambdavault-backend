@@ -42,7 +42,7 @@ type RateLimitConfig struct {
 
 func Load() (*Config, error) {
 	if err := godotenv.Load(); err != nil {
-		if os.Getenv("APP_ENV") == "" {
+		if !os.IsNotExist(err) && os.Getenv("APP_ENV") == "" {
 			return nil, err
 		}
 	}

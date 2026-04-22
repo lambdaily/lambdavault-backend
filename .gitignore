@@ -6,6 +6,7 @@
 *.dylib
 bin/
 build/
+api
 
 # Test binary
 *.test
@@ -47,3 +48,6 @@ logs/
 # Temporary files
 tmp/
 temp/
+
+# Frontend app (separate repository)
+/mobile/
