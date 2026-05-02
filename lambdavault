@@ -11,22 +11,30 @@ while [[ -h "$SCRIPT_PATH" ]]; do
 done
 ROOT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
 APP_PORT="${APP_PORT:-8081}"
+PROD_API_URL="${PROD_API_URL:-https://lambdavault-backend-production.up.railway.app}"
 
 usage() {
   cat <<'EOF'
 Usage:
-  lambdavault run <device> [port]
+  lambdavault run <device_or_alias> [port]
+  lambdavault run <device_or_alias> prod [api_url]
   lambdavault set-password <email> [new_password]
 
-Devices:
-  macos
-  ios
-  android
+Device aliases:
+  macos     (desktop)
+  ios       (first available iOS simulator/device)
+  android   (first available Android emulator/device)
+
+You can also pass a concrete Flutter device id (for example: emulator-5554).
 
 Examples:
   lambdavault run macos
+  lambdavault run android
+  lambdavault run ios prod
+  lambdavault run emulator-5554 prod
   lambdavault run macos 8081
-  APP_PORT=8082 lambdavault run macos
+  lambdavault run macos prod https://lambdavault-backend-production.up.railway.app
+  APP_PORT=8082 lambdavault run android
   lambdavault set-password pablo.espinoza.mail@gmail.com
 EOF
 }
@@ -52,6 +60,16 @@ validate_port() {
   fi
 }
 
+validate_url() {
+  local url="$1"
+
+  if [[ ! "$url" =~ ^https?:// ]]; then
+    echo "Invalid URL: $url" >&2
+    echo "Expected format: https://example.com" >&2
+    exit 1
+  fi
+}
+
 wait_for_backend() {
   local retries=30
   local delay=1
@@ -66,8 +84,48 @@ wait_for_backend() {
   return 1
 }
 
+resolve_device_id() {
+  local requested="$1"
+
+  case "$requested" in
+    macos)
+      echo "macos"
+      return 0
+      ;;
+    android)
+      local android_id
+      android_id="$(flutter devices | awk -F '•' '/android/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit}')"
+      if [[ -z "$android_id" ]]; then
+        echo "No Android device/emulator found. Start one and try again." >&2
+        echo "Tip: run 'flutter devices' to list available IDs." >&2
+        exit 1
+      fi
+      echo "$android_id"
+      return 0
+      ;;
+    ios)
+      local ios_id
+      ios_id="$(flutter devices | awk -F '•' '/ios|darwin-ios/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit}')"
+      if [[ -z "$ios_id" ]]; then
+        echo "No iOS simulator/device found. Start one and try again." >&2
+        echo "Tip: run 'flutter devices' to list available IDs." >&2
+        exit 1
+      fi
+      echo "$ios_id"
+      return 0
+      ;;
+    *)
+      # Assume it's a concrete Flutter device id.
+      echo "$requested"
+      return 0
+      ;;
+  esac
+}
+
 run_all() {
-  local device="$1"
+  local requested_device="$1"
+  local device
+  device="$(resolve_device_id "$requested_device")"
   local backend_pid=""
 
   cleanup() {
@@ -92,10 +150,25 @@ run_all() {
     exit 1
   fi
 
-  echo "Backend ready. Starting Flutter on $device..."
+  echo "Backend ready. Starting Flutter on $device (requested: $requested_device)..."
   (
     cd "$ROOT_DIR/mobile"
     flutter run -d "$device"
+  )
+}
+
+run_prod() {
+  local requested_device="$1"
+  local device
+  device="$(resolve_device_id "$requested_device")"
+  local api_url="$2"
+
+  validate_url "$api_url"
+
+  echo "Starting Flutter on $device (requested: $requested_device) using production API: $api_url"
+  (
+    cd "$ROOT_DIR/mobile"
+    flutter run -d "$device" --dart-define="API_BASE_URL=$api_url"
   )
 }
 
@@ -137,27 +210,30 @@ main() {
   local command="${1:-}"
   case "$command" in
     run)
-      require_cmd make
       require_cmd flutter
-      require_cmd nc
 
       local device="${2:-}"
-      local port_arg="${3:-}"
-
-      if [[ -n "$port_arg" ]]; then
-        validate_port "$port_arg"
-        APP_PORT="$port_arg"
+      if [[ -z "$device" ]]; then
+        usage
+        exit 1
       fi
 
-      case "$device" in
-        macos|ios|android)
-          run_all "$device"
-          ;;
-        *)
-          usage
-          exit 1
-          ;;
-      esac
+      local run_mode_or_port="${3:-}"
+
+      if [[ "$run_mode_or_port" == "prod" ]]; then
+        local api_url="${4:-$PROD_API_URL}"
+        run_prod "$device" "$api_url"
+      else
+        require_cmd make
+        require_cmd nc
+
+        if [[ -n "$run_mode_or_port" ]]; then
+          validate_port "$run_mode_or_port"
+          APP_PORT="$run_mode_or_port"
+        fi
+
+        run_all "$device"
+      fi
       ;;
     set-password)
       require_cmd go
