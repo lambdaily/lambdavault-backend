@@ -10,6 +10,14 @@ var (
 	ErrPasswordNotFound = errors.New("password not found")
 	ErrAccessDenied     = errors.New("access denied")
 
+	ErrGroupNotFound         = errors.New("group not found")
+	ErrGroupMemberNotFound   = errors.New("group member not found")
+	ErrGroupMemberExists     = errors.New("group member already exists")
+	ErrGroupOwnerImmutable   = errors.New("the group owner cannot be removed or demoted")
+	ErrInvalidGroupRole      = errors.New("invalid group role")
+	ErrCannotInviteSelf      = errors.New("cannot invite yourself to a group")
+	ErrInsufficientGroupRole = errors.New("you do not have permission to perform this action in the group")
+
 	ErrEncryptionFailed = errors.New("encryption failed")
 	ErrDecryptionFailed = errors.New("decryption failed")
 

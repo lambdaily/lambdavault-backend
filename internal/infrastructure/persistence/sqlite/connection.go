@@ -43,6 +43,8 @@ func NewDatabase(dbPath string, isProduction bool) (*Database, error) {
 func runMigrations(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&entity.User{},
+		&entity.PasswordGroup{},
+		&entity.GroupMember{},
 		&entity.Password{},
 	)
 }

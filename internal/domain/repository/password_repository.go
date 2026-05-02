@@ -17,4 +17,8 @@ type PasswordRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	DeleteAllByUserID(ctx context.Context, userID uuid.UUID) error
 	SearchByUserID(ctx context.Context, userID uuid.UUID, query string) ([]*entity.Password, error)
+
+	// Group-scoped operations.
+	FindAllByGroupID(ctx context.Context, groupID uuid.UUID) ([]*entity.Password, error)
+	SearchByGroupID(ctx context.Context, groupID uuid.UUID, query string) ([]*entity.Password, error)
 }

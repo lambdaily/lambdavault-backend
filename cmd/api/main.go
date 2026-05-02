@@ -37,6 +37,7 @@ func run() error {
 
 	userRepo := sqlite.NewUserRepository(db.DB)
 	passwordRepo := sqlite.NewPasswordRepository(db.DB)
+	groupRepo := sqlite.NewPasswordGroupRepository(db.DB)
 	hasher := security.NewArgon2Hasher()
 	jwtService := security.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiration)
 
@@ -45,7 +46,7 @@ func run() error {
 		return err
 	}
 
-	r := router.New(cfg, userRepo, passwordRepo, jwtService, hasher, encryptor)
+	r := router.New(cfg, userRepo, passwordRepo, groupRepo, jwtService, hasher, encryptor)
 	r.Setup()
 
 	log.Printf("🔐 %s starting on port %s [%s]", cfg.App.Name, cfg.App.Port, cfg.App.Env)

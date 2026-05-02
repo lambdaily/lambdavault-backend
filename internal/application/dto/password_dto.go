@@ -25,14 +25,15 @@ type UpdatePasswordRequest struct {
 }
 
 type PasswordResponse struct {
-	ID        uuid.UUID `json:"id"`
-	SiteName  string    `json:"site_name"`
-	SiteURL   string    `json:"site_url"`
-	Username  string    `json:"username"`
-	Notes     string    `json:"notes"`
-	Category  string    `json:"category"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        uuid.UUID  `json:"id"`
+	GroupID   *uuid.UUID `json:"group_id,omitempty"`
+	SiteName  string     `json:"site_name"`
+	SiteURL   string     `json:"site_url"`
+	Username  string     `json:"username"`
+	Notes     string     `json:"notes"`
+	Category  string     `json:"category"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 type PasswordWithSecretResponse struct {

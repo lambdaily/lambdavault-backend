@@ -36,9 +36,14 @@ func (r *passwordRepository) FindByID(ctx context.Context, id uuid.UUID) (*entit
 	return &password, nil
 }
 
+// FindByIDAndUserID looks up a password owned by a user in their personal
+// vault. Group-shared passwords are intentionally excluded so this method
+// continues to mean "private password owned by this user".
 func (r *passwordRepository) FindByIDAndUserID(ctx context.Context, id, userID uuid.UUID) (*entity.Password, error) {
 	var password entity.Password
-	result := r.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).First(&password)
+	result := r.db.WithContext(ctx).
+		Where("id = ? AND user_id = ? AND group_id IS NULL", id, userID).
+		First(&password)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, domainErrors.ErrPasswordNotFound
@@ -50,7 +55,10 @@ func (r *passwordRepository) FindByIDAndUserID(ctx context.Context, id, userID u
 
 func (r *passwordRepository) FindAllByUserID(ctx context.Context, userID uuid.UUID) ([]*entity.Password, error) {
 	var passwords []*entity.Password
-	result := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC").Find(&passwords)
+	result := r.db.WithContext(ctx).
+		Where("user_id = ? AND group_id IS NULL", userID).
+		Order("created_at DESC").
+		Find(&passwords)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -60,7 +68,7 @@ func (r *passwordRepository) FindAllByUserID(ctx context.Context, userID uuid.UU
 func (r *passwordRepository) FindByUserIDAndSiteName(ctx context.Context, userID uuid.UUID, siteName string) ([]*entity.Password, error) {
 	var passwords []*entity.Password
 	result := r.db.WithContext(ctx).
-		Where("user_id = ? AND site_name LIKE ?", userID, "%"+siteName+"%").
+		Where("user_id = ? AND group_id IS NULL AND site_name LIKE ?", userID, "%"+siteName+"%").
 		Order("created_at DESC").
 		Find(&passwords)
 	if result.Error != nil {
@@ -79,7 +87,7 @@ func (r *passwordRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *passwordRepository) DeleteAllByUserID(ctx context.Context, userID uuid.UUID) error {
-	result := r.db.WithContext(ctx).Delete(&entity.Password{}, "user_id = ?", userID)
+	result := r.db.WithContext(ctx).Delete(&entity.Password{}, "user_id = ? AND group_id IS NULL", userID)
 	return result.Error
 }
 
@@ -87,7 +95,34 @@ func (r *passwordRepository) SearchByUserID(ctx context.Context, userID uuid.UUI
 	var passwords []*entity.Password
 	searchPattern := "%" + query + "%"
 	err := r.db.WithContext(ctx).
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND group_id IS NULL", userID).
+		Where("site_name LIKE ? OR username LIKE ? OR notes LIKE ? OR category LIKE ?",
+			searchPattern, searchPattern, searchPattern, searchPattern).
+		Order("updated_at DESC").
+		Find(&passwords).Error
+	if err != nil {
+		return nil, err
+	}
+	return passwords, nil
+}
+
+func (r *passwordRepository) FindAllByGroupID(ctx context.Context, groupID uuid.UUID) ([]*entity.Password, error) {
+	var passwords []*entity.Password
+	result := r.db.WithContext(ctx).
+		Where("group_id = ?", groupID).
+		Order("created_at DESC").
+		Find(&passwords)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return passwords, nil
+}
+
+func (r *passwordRepository) SearchByGroupID(ctx context.Context, groupID uuid.UUID, query string) ([]*entity.Password, error) {
+	var passwords []*entity.Password
+	searchPattern := "%" + query + "%"
+	err := r.db.WithContext(ctx).
+		Where("group_id = ?", groupID).
 		Where("site_name LIKE ? OR username LIKE ? OR notes LIKE ? OR category LIKE ?",
 			searchPattern, searchPattern, searchPattern, searchPattern).
 		Order("updated_at DESC").

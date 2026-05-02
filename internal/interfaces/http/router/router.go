@@ -18,6 +18,7 @@ type Router struct {
 	config         *config.Config
 	userRepo       repository.UserRepository
 	passwordRepo   repository.PasswordRepository
+	groupRepo      repository.PasswordGroupRepository
 	jwtService     security.JWTService
 	hasher         security.Hasher
 	encryptor      security.Encryptor
@@ -28,6 +29,7 @@ func New(
 	cfg *config.Config,
 	userRepo repository.UserRepository,
 	passwordRepo repository.PasswordRepository,
+	groupRepo repository.PasswordGroupRepository,
 	jwtService security.JWTService,
 	hasher security.Hasher,
 	encryptor security.Encryptor,
@@ -38,6 +40,7 @@ func New(
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
+	engine.Use(middleware.CORS())
 
 	if cfg.IsDevelopment() {
 		engine.Use(gin.Logger())
@@ -48,6 +51,7 @@ func New(
 		config:         cfg,
 		userRepo:       userRepo,
 		passwordRepo:   passwordRepo,
+		groupRepo:      groupRepo,
 		jwtService:     jwtService,
 		hasher:         hasher,
 		encryptor:      encryptor,
@@ -75,7 +79,7 @@ func (r *Router) setupHealthRoutes() {
 }
 
 func (r *Router) setupAuthRoutes() {
-	authUseCase := usecase.NewAuthUseCase(r.userRepo, r.hasher, r.jwtService)
+	authUseCase := usecase.NewAuthUseCase(r.userRepo, r.groupRepo, r.hasher, r.jwtService)
 	authHandler := handler.NewAuthHandler(authUseCase, validator.New())
 
 	auth := r.engine.Group("/api/v1/auth")
@@ -86,11 +90,14 @@ func (r *Router) setupAuthRoutes() {
 }
 
 func (r *Router) setupProtectedRoutes() {
-	authUseCase := usecase.NewAuthUseCase(r.userRepo, r.hasher, r.jwtService)
+	authUseCase := usecase.NewAuthUseCase(r.userRepo, r.groupRepo, r.hasher, r.jwtService)
 	authHandler := handler.NewAuthHandler(authUseCase, validator.New())
 
-	passwordUseCase := usecase.NewPasswordUseCase(r.passwordRepo, r.encryptor)
+	passwordUseCase := usecase.NewPasswordUseCase(r.passwordRepo, r.groupRepo, r.encryptor)
 	passwordHandler := handler.NewPasswordHandler(passwordUseCase, validator.New())
+
+	groupUseCase := usecase.NewGroupUseCase(r.groupRepo, r.userRepo)
+	groupHandler := handler.NewGroupHandler(groupUseCase, passwordUseCase, validator.New())
 
 	generatorUseCase := usecase.NewGeneratorUseCase()
 	generatorHandler := handler.NewGeneratorHandler(generatorUseCase)
@@ -108,6 +115,27 @@ func (r *Router) setupProtectedRoutes() {
 			passwords.GET("/:id", passwordHandler.GetByID)
 			passwords.PUT("/:id", passwordHandler.Update)
 			passwords.DELETE("/:id", passwordHandler.Delete)
+		}
+
+		groups := api.Group("/groups")
+		{
+			groups.POST("", groupHandler.Create)
+			groups.GET("", groupHandler.List)
+			groups.GET("/:id", groupHandler.Get)
+			groups.PUT("/:id", groupHandler.Update)
+			groups.DELETE("/:id", groupHandler.Delete)
+			groups.POST("/:id/leave", groupHandler.Leave)
+
+			groups.GET("/:id/members", groupHandler.ListMembers)
+			groups.POST("/:id/members", groupHandler.AddMembers)
+			groups.PUT("/:id/members/:memberId", groupHandler.UpdateMemberRole)
+			groups.DELETE("/:id/members/:memberId", groupHandler.RemoveMember)
+
+			groups.GET("/:id/passwords", groupHandler.ListPasswords)
+			groups.POST("/:id/passwords", groupHandler.CreatePassword)
+			groups.GET("/:id/passwords/:passwordId", groupHandler.GetPassword)
+			groups.PUT("/:id/passwords/:passwordId", groupHandler.UpdatePassword)
+			groups.DELETE("/:id/passwords/:passwordId", groupHandler.DeletePassword)
 		}
 	}
 }

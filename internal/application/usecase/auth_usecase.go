@@ -17,17 +17,20 @@ type AuthUseCase interface {
 
 type authUseCase struct {
 	userRepo   repository.UserRepository
+	groupRepo  repository.PasswordGroupRepository
 	hasher     security.Hasher
 	jwtService security.JWTService
 }
 
 func NewAuthUseCase(
 	userRepo repository.UserRepository,
+	groupRepo repository.PasswordGroupRepository,
 	hasher security.Hasher,
 	jwtService security.JWTService,
 ) AuthUseCase {
 	return &authUseCase{
 		userRepo:   userRepo,
+		groupRepo:  groupRepo,
 		hasher:     hasher,
 		jwtService: jwtService,
 	}
@@ -51,6 +54,14 @@ func (uc *authUseCase) Register(ctx context.Context, req dto.RegisterRequest) (*
 
 	if err := uc.userRepo.Create(ctx, user); err != nil {
 		return nil, err
+	}
+
+	// Activate any pending group invitations addressed to this email so the
+	// new user immediately sees the groups they were invited to.
+	if uc.groupRepo != nil {
+		if _, err := uc.groupRepo.ActivatePendingForEmail(ctx, user.Email, user.ID); err != nil {
+			return nil, err
+		}
 	}
 
 	token, err := uc.jwtService.GenerateToken(user.ID, user.Email)
