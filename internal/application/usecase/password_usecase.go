@@ -2,10 +2,14 @@ package usecase
 
 import (
 	"context"
+	"log"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/lambdavault/api/internal/application/dto"
+	appservice "github.com/lambdavault/api/internal/application/service"
 	"github.com/lambdavault/api/internal/domain/entity"
 	domainErrors "github.com/lambdavault/api/internal/domain/errors"
 	"github.com/lambdavault/api/internal/domain/repository"
@@ -37,18 +41,27 @@ type PasswordUseCase interface {
 type passwordUseCase struct {
 	passwordRepo repository.PasswordRepository
 	groupRepo    repository.PasswordGroupRepository
+	userRepo     repository.UserRepository
 	encryptor    security.Encryptor
+	notifier     appservice.Notifier
 }
 
 func NewPasswordUseCase(
 	passwordRepo repository.PasswordRepository,
 	groupRepo repository.PasswordGroupRepository,
+	userRepo repository.UserRepository,
 	encryptor security.Encryptor,
+	notifier appservice.Notifier,
 ) PasswordUseCase {
+	if notifier == nil {
+		notifier = appservice.NoopNotifier{}
+	}
 	return &passwordUseCase{
 		passwordRepo: passwordRepo,
 		groupRepo:    groupRepo,
+		userRepo:     userRepo,
 		encryptor:    encryptor,
+		notifier:     notifier,
 	}
 }
 
@@ -72,6 +85,7 @@ func (uc *passwordUseCase) Create(ctx context.Context, userID uuid.UUID, req dto
 	if err := uc.passwordRepo.Create(ctx, password); err != nil {
 		return nil, err
 	}
+	uc.notifyPasswordCreated(ctx, userID, password)
 
 	return uc.toResponse(password), nil
 }
@@ -169,6 +183,7 @@ func (uc *passwordUseCase) CreateInGroup(ctx context.Context, userID, groupID uu
 		_ = uc.passwordRepo.Delete(ctx, password.ID)
 		return nil, err
 	}
+	uc.notifyPasswordShared(ctx, userID, group, password)
 	return uc.toResponse(password), nil
 }
 
@@ -188,6 +203,7 @@ func (uc *passwordUseCase) AddExistingToGroup(ctx context.Context, userID, group
 	if err := uc.passwordRepo.ShareWithGroup(ctx, password.ID, groupID, userID); err != nil {
 		return nil, err
 	}
+	uc.notifyPasswordShared(ctx, userID, group, password)
 	return uc.toResponse(password), nil
 }
 
@@ -290,6 +306,111 @@ func (uc *passwordUseCase) requireGroupAccess(ctx context.Context, userID, group
 		return nil, "", domainErrors.ErrGroupNotFound
 	}
 	return group, member.Role, nil
+}
+
+func (uc *passwordUseCase) notifyPasswordCreated(ctx context.Context, ownerID uuid.UUID, password *entity.Password) {
+	owner, err := uc.userRepo.FindByID(ctx, ownerID)
+	if err != nil {
+		log.Printf("warn: notification skipped (load owner for password created): %v", err)
+		return
+	}
+	if err := uc.notifier.NotifyPasswordCreated(ctx, appservice.PasswordCreatedEvent{
+		PasswordID:      password.ID,
+		OwnerID:         owner.ID,
+		OwnerEmail:      owner.Email,
+		OwnerPhone:      owner.Phone,
+		SiteName:        password.SiteName,
+		SiteURL:         password.SiteURL,
+		Username:        password.Username,
+		Category:        password.Category,
+		OccurredAt:      time.Now(),
+		RecipientEmails: compactNonEmpty(owner.Email),
+		RecipientPhones: compactNonEmpty(owner.Phone),
+	}); err != nil {
+		log.Printf("warn: password-created notification failed: %v", err)
+	}
+}
+
+func (uc *passwordUseCase) notifyPasswordShared(ctx context.Context, actorID uuid.UUID, group *entity.PasswordGroup, password *entity.Password) {
+	actor, err := uc.userRepo.FindByID(ctx, actorID)
+	if err != nil {
+		log.Printf("warn: notification skipped (load actor for password shared): %v", err)
+		return
+	}
+	members, err := uc.groupRepo.ListMembers(ctx, group.ID)
+	if err != nil {
+		log.Printf("warn: notification skipped (list group members): %v", err)
+		return
+	}
+
+	recipientEmails := make([]string, 0, len(members))
+	recipientPhones := make([]string, 0, len(members))
+	seenEmails := map[string]struct{}{}
+	seenPhones := map[string]struct{}{}
+	for _, member := range members {
+		if member == nil || member.Status != entity.GroupMemberStatusActive {
+			continue
+		}
+		if member.Email != "" && member.Email != actor.Email {
+			if _, ok := seenEmails[member.Email]; !ok {
+				seenEmails[member.Email] = struct{}{}
+				recipientEmails = append(recipientEmails, member.Email)
+			}
+		}
+		if member.UserID == nil {
+			continue
+		}
+		memberUser, err := uc.userRepo.FindByID(ctx, *member.UserID)
+		if err != nil {
+			continue
+		}
+		if memberUser.Phone == "" || memberUser.ID == actor.ID {
+			continue
+		}
+		if _, ok := seenPhones[memberUser.Phone]; ok {
+			continue
+		}
+		seenPhones[memberUser.Phone] = struct{}{}
+		recipientPhones = append(recipientPhones, memberUser.Phone)
+	}
+	if len(recipientEmails) == 0 && len(recipientPhones) == 0 {
+		return
+	}
+
+	if err := uc.notifier.NotifyPasswordShared(ctx, appservice.PasswordSharedEvent{
+		PasswordID:      password.ID,
+		GroupID:         group.ID,
+		GroupName:       group.Name,
+		SharedByUserID:  actor.ID,
+		SharedByEmail:   actor.Email,
+		SharedByPhone:   actor.Phone,
+		SiteName:        password.SiteName,
+		SiteURL:         password.SiteURL,
+		Username:        password.Username,
+		Category:        password.Category,
+		OccurredAt:      time.Now(),
+		RecipientEmails: recipientEmails,
+		RecipientPhones: recipientPhones,
+	}); err != nil {
+		log.Printf("warn: password-shared notification failed: %v", err)
+	}
+}
+
+func compactNonEmpty(values ...string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (uc *passwordUseCase) toListResponse(passwords []*entity.Password) *dto.PasswordListResponse {

@@ -4,6 +4,7 @@ import "github.com/google/uuid"
 
 type RegisterRequest struct {
 	Email          string `json:"email" validate:"required,email"`
+	Phone          string `json:"phone" validate:"omitempty,min=8,max=32"`
 	MasterPassword string `json:"master_password" validate:"required,min=8,max=128"`
 }
 
@@ -17,7 +18,12 @@ type AuthResponse struct {
 	User  UserResponse `json:"user"`
 }
 
+type UpdateMyPhoneRequest struct {
+	Phone string `json:"phone" validate:"required,min=8,max=32"`
+}
+
 type UserResponse struct {
 	ID    uuid.UUID `json:"id"`
 	Email string    `json:"email"`
+	Phone string    `json:"phone,omitempty"`
 }

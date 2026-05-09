@@ -11,12 +11,13 @@ import (
 )
 
 type Config struct {
-	App        AppConfig
-	Database   DatabaseConfig
-	JWT        JWTConfig
-	Encryption EncryptionConfig
-	RateLimit  RateLimitConfig
-	CORS       CORSConfig
+	App          AppConfig
+	Database     DatabaseConfig
+	JWT          JWTConfig
+	Encryption   EncryptionConfig
+	RateLimit    RateLimitConfig
+	CORS         CORSConfig
+	Notification NotificationConfig
 }
 
 type AppConfig struct {
@@ -56,15 +57,23 @@ type CORSConfig struct {
 	Origins []string
 }
 
+type NotificationConfig struct {
+	WhatsmiauAPIBaseURL string
+	WhatsmiauAPIKey     string
+	WhatsmiauInstance   string
+	WhatsmiauPhone      string
+	Timeout             time.Duration
+}
+
 // Insecure values that are explicitly forbidden for JWT_SECRET / ENCRYPTION_KEY.
 // We compare against these to make sure operators rotate them before going
 // to production.
 var forbiddenSecrets = map[string]struct{}{
-	"":                                            {},
+	"": {},
 	"your-super-secret-jwt-key-change-in-production": {},
-	"your-32-byte-encryption-key-here":             {},
-	"changeme":                                     {},
-	"secret":                                       {},
+	"your-32-byte-encryption-key-here":               {},
+	"changeme":                                       {},
+	"secret":                                         {},
 }
 
 const (
@@ -84,6 +93,7 @@ func Load() (*Config, error) {
 	rateBurst, _ := strconv.Atoi(getEnv("RATE_LIMIT_BURST", "20"))
 	authRPS, _ := strconv.ParseFloat(getEnv("RATE_LIMIT_AUTH_RPS", "1"), 64)
 	authBurst, _ := strconv.Atoi(getEnv("RATE_LIMIT_AUTH_BURST", "5"))
+	notificationTimeoutSeconds, _ := strconv.Atoi(getEnv("WHATSMIAU_TIMEOUT_SECONDS", "5"))
 
 	cfg := &Config{
 		App: AppConfig{
@@ -111,6 +121,13 @@ func Load() (*Config, error) {
 		},
 		CORS: CORSConfig{
 			Origins: parseCSV(getEnv("CORS_ORIGINS", "")),
+		},
+		Notification: NotificationConfig{
+			WhatsmiauAPIBaseURL: getEnv("WHATSMIAU_API_BASE_URL", "https://api.whatsmiau.dev/v2"),
+			WhatsmiauAPIKey:     getEnv("WHATSMIAU_API_KEY", ""),
+			WhatsmiauInstance:   getEnv("WHATSMIAU_INSTANCE", ""),
+			WhatsmiauPhone:      getEnv("WHATSMIAU_PHONE", ""),
+			Timeout:             time.Duration(notificationTimeoutSeconds) * time.Second,
 		},
 	}
 

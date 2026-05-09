@@ -4,7 +4,9 @@ import (
 	"log"
 	"os"
 
+	appservice "github.com/lambdavault/api/internal/application/service"
 	"github.com/lambdavault/api/internal/infrastructure/config"
+	"github.com/lambdavault/api/internal/infrastructure/notification"
 	"github.com/lambdavault/api/internal/infrastructure/persistence/database"
 	"github.com/lambdavault/api/internal/infrastructure/security"
 	"github.com/lambdavault/api/internal/interfaces/http/router"
@@ -55,7 +57,19 @@ func run() error {
 		return err
 	}
 
-	r := router.New(cfg, userRepo, passwordRepo, groupRepo, jwtService, hasher, encryptor, db)
+	var notifier appservice.Notifier = appservice.NoopNotifier{}
+	if cfg.Notification.WhatsmiauAPIKey != "" && cfg.Notification.WhatsmiauInstance != "" {
+		notifier = notification.NewWhatsmiauAPINotifier(notification.WhatsmiauAPIConfig{
+			BaseURL:      cfg.Notification.WhatsmiauAPIBaseURL,
+			APIKey:       cfg.Notification.WhatsmiauAPIKey,
+			InstanceName: cfg.Notification.WhatsmiauInstance,
+			DefaultPhone: cfg.Notification.WhatsmiauPhone,
+			Timeout:      cfg.Notification.Timeout,
+		})
+		log.Printf("📣 Whatsmiau API notifications enabled -> instance=%s", cfg.Notification.WhatsmiauInstance)
+	}
+
+	r := router.New(cfg, userRepo, passwordRepo, groupRepo, jwtService, hasher, encryptor, notifier, db)
 	r.Setup()
 
 	log.Printf("🔐 %s starting on port %s [%s] driver=%s", cfg.App.Name, cfg.App.Port, cfg.App.Env, cfg.Database.Driver)

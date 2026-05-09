@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/lambdavault/api/internal/application/dto"
 	"github.com/lambdavault/api/internal/application/usecase"
@@ -80,16 +81,54 @@ func (h *AuthHandler) handleError(c *gin.Context, err error) {
 }
 
 func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
-	userID, exists := c.Get("userID")
-	if !exists {
+	userID, err := currentUserID(c)
+	if err != nil {
 		response.Unauthorized(c, "user not authenticated")
 		return
 	}
 
-	email, _ := c.Get("email")
+	result, err := h.authUseCase.GetCurrentUser(c.Request.Context(), userID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+	response.OK(c, result)
+}
 
-	response.OK(c, gin.H{
-		"id":    userID,
-		"email": email,
-	})
+func (h *AuthHandler) UpdateMyPhone(c *gin.Context) {
+	userID, err := currentUserID(c)
+	if err != nil {
+		response.Unauthorized(c, "user not authenticated")
+		return
+	}
+
+	var req dto.UpdateMyPhoneRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request body")
+		return
+	}
+	if err := h.validator.Struct(req); err != nil {
+		errors := h.validator.FormatErrors(err)
+		response.BadRequest(c, "validation failed", errors...)
+		return
+	}
+
+	result, err := h.authUseCase.UpdatePhone(c.Request.Context(), userID, req.Phone)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+	response.Success(c, 200, "phone updated successfully", result)
+}
+
+func currentUserID(c *gin.Context) (uuid.UUID, error) {
+	userIDValue, exists := c.Get("userID")
+	if !exists {
+		return uuid.Nil, domainErrors.ErrMissingAuthHeader
+	}
+	userID, ok := userIDValue.(uuid.UUID)
+	if !ok {
+		return uuid.Nil, domainErrors.ErrInvalidToken
+	}
+	return userID, nil
 }

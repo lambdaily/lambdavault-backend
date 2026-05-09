@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/gin-gonic/gin"
 
+	appservice "github.com/lambdavault/api/internal/application/service"
 	"github.com/lambdavault/api/internal/application/usecase"
 	"github.com/lambdavault/api/internal/domain/repository"
 	"github.com/lambdavault/api/internal/infrastructure/config"
@@ -24,6 +25,7 @@ type Router struct {
 	jwtService     security.JWTService
 	hasher         security.Hasher
 	encryptor      security.Encryptor
+	notifier       appservice.Notifier
 	authMiddleware *middleware.AuthMiddleware
 }
 
@@ -35,6 +37,7 @@ func New(
 	jwtService security.JWTService,
 	hasher security.Hasher,
 	encryptor security.Encryptor,
+	notifier appservice.Notifier,
 	db *database.Database,
 ) *Router {
 	if cfg.IsProduction() {
@@ -61,6 +64,7 @@ func New(
 		jwtService:     jwtService,
 		hasher:         hasher,
 		encryptor:      encryptor,
+		notifier:       notifier,
 		authMiddleware: middleware.NewAuthMiddleware(jwtService),
 	}
 }
@@ -106,7 +110,7 @@ func (r *Router) setupProtectedRoutes() {
 	authUseCase := usecase.NewAuthUseCase(r.userRepo, r.groupRepo, r.hasher, r.jwtService)
 	authHandler := handler.NewAuthHandler(authUseCase, validator.New())
 
-	passwordUseCase := usecase.NewPasswordUseCase(r.passwordRepo, r.groupRepo, r.encryptor)
+	passwordUseCase := usecase.NewPasswordUseCase(r.passwordRepo, r.groupRepo, r.userRepo, r.encryptor, r.notifier)
 	passwordHandler := handler.NewPasswordHandler(passwordUseCase, validator.New())
 
 	groupUseCase := usecase.NewGroupUseCase(r.groupRepo, r.userRepo)
@@ -119,6 +123,7 @@ func (r *Router) setupProtectedRoutes() {
 	api.Use(r.authMiddleware.RequireAuth())
 	{
 		api.GET("/me", authHandler.GetCurrentUser)
+		api.PUT("/me/phone", authHandler.UpdateMyPhone)
 		api.GET("/generate-password", generatorHandler.Generate)
 
 		passwords := api.Group("/passwords")

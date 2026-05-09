@@ -2,7 +2,9 @@ package usecase
 
 import (
 	"context"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/lambdavault/api/internal/application/dto"
 	"github.com/lambdavault/api/internal/domain/entity"
 	domainErrors "github.com/lambdavault/api/internal/domain/errors"
@@ -13,6 +15,8 @@ import (
 type AuthUseCase interface {
 	Register(ctx context.Context, req dto.RegisterRequest) (*dto.AuthResponse, error)
 	Login(ctx context.Context, req dto.LoginRequest) (*dto.AuthResponse, error)
+	GetCurrentUser(ctx context.Context, userID uuid.UUID) (*dto.UserResponse, error)
+	UpdatePhone(ctx context.Context, userID uuid.UUID, phone string) (*dto.UserResponse, error)
 }
 
 type authUseCase struct {
@@ -50,7 +54,7 @@ func (uc *authUseCase) Register(ctx context.Context, req dto.RegisterRequest) (*
 		return nil, err
 	}
 
-	user := entity.NewUser(req.Email, hash, salt)
+	user := entity.NewUser(req.Email, normalizePhone(req.Phone), hash, salt)
 
 	if err := uc.userRepo.Create(ctx, user); err != nil {
 		return nil, err
@@ -74,6 +78,7 @@ func (uc *authUseCase) Register(ctx context.Context, req dto.RegisterRequest) (*
 		User: dto.UserResponse{
 			ID:    user.ID,
 			Email: user.Email,
+			Phone: user.Phone,
 		},
 	}, nil
 }
@@ -105,6 +110,39 @@ func (uc *authUseCase) Login(ctx context.Context, req dto.LoginRequest) (*dto.Au
 		User: dto.UserResponse{
 			ID:    user.ID,
 			Email: user.Email,
+			Phone: user.Phone,
 		},
 	}, nil
+}
+
+func (uc *authUseCase) GetCurrentUser(ctx context.Context, userID uuid.UUID) (*dto.UserResponse, error) {
+	user, err := uc.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return &dto.UserResponse{
+		ID:    user.ID,
+		Email: user.Email,
+		Phone: user.Phone,
+	}, nil
+}
+
+func (uc *authUseCase) UpdatePhone(ctx context.Context, userID uuid.UUID, phone string) (*dto.UserResponse, error) {
+	user, err := uc.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	user.Phone = normalizePhone(phone)
+	if err := uc.userRepo.Update(ctx, user); err != nil {
+		return nil, err
+	}
+	return &dto.UserResponse{
+		ID:    user.ID,
+		Email: user.Email,
+		Phone: user.Phone,
+	}, nil
+}
+
+func normalizePhone(phone string) string {
+	return strings.TrimSpace(phone)
 }
