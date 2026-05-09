@@ -9,8 +9,8 @@ WORKDIR /src
 
 # Cache go modules across builds.
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod \
+    --mount=type=cache,id=gobuildcache,target=/root/.cache/go-build \
     go mod download
 
 COPY . .
@@ -20,8 +20,8 @@ COPY . .
 # that path) and we publish a small distroless runtime image so the build
 # overhead is acceptable. Strip symbols and disable DWARF to slim the
 # binary; -trimpath removes local paths from the binary.
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod \
+    --mount=type=cache,id=gobuildcache,target=/root/.cache/go-build \
     CGO_ENABLED=1 GOOS=linux go build \
         -trimpath \
         -ldflags="-s -w" \
