@@ -61,17 +61,19 @@ func main() {
 		exit("failed to migrate postgres schema: %v", err)
 	}
 
-	// Order matters: respect foreign keys.
-	if err := copyTable[entity.User](src, dst, "users", *dryRun); err != nil {
+	// Order matters: respect foreign keys. Some older SQLite vaults predate
+	// shared groups, so password_groups / group_members may legitimately be
+	// absent in the source DB and should be skipped.
+	if err := copyTable[entity.User](src, dst, "users", *dryRun, true); err != nil {
 		exit("%v", err)
 	}
-	if err := copyTable[entity.PasswordGroup](src, dst, "password_groups", *dryRun); err != nil {
+	if err := copyTable[entity.PasswordGroup](src, dst, "password_groups", *dryRun, false); err != nil {
 		exit("%v", err)
 	}
-	if err := copyTable[entity.GroupMember](src, dst, "group_members", *dryRun); err != nil {
+	if err := copyTable[entity.GroupMember](src, dst, "group_members", *dryRun, false); err != nil {
 		exit("%v", err)
 	}
-	if err := copyTable[entity.Password](src, dst, "passwords", *dryRun); err != nil {
+	if err := copyTable[entity.Password](src, dst, "passwords", *dryRun, true); err != nil {
 		exit("%v", err)
 	}
 
@@ -85,7 +87,15 @@ func main() {
 // copyTable streams every row of the given entity from src to dst, inserting
 // in batches and skipping primary-key conflicts so the operation is safe to
 // retry.
-func copyTable[T any](src, dst *gorm.DB, name string, dryRun bool) error {
+func copyTable[T any](src, dst *gorm.DB, name string, dryRun bool, required bool) error {
+	if !src.Migrator().HasTable(name) {
+		if required {
+			return fmt.Errorf("source sqlite table %s not found", name)
+		}
+		log.Printf("→ %s: source table missing, skipping (legacy schema)", name)
+		return nil
+	}
+
 	var rows []T
 	if err := src.Find(&rows).Error; err != nil {
 		return fmt.Errorf("read %s from sqlite: %w", name, err)

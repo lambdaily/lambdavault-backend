@@ -293,6 +293,36 @@ func (h *GroupHandler) CreatePassword(c *gin.Context) {
 	response.Created(c, "password created successfully", result)
 }
 
+func (h *GroupHandler) AddExistingPassword(c *gin.Context) {
+	userID, _, err := h.identity(c)
+	if err != nil {
+		response.Unauthorized(c, "user not authenticated")
+		return
+	}
+	groupID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.BadRequest(c, "invalid group ID")
+		return
+	}
+
+	var req dto.AddExistingGroupPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request body")
+		return
+	}
+	if err := h.validator.Struct(req); err != nil {
+		response.BadRequest(c, "validation failed", h.validator.FormatErrors(err)...)
+		return
+	}
+
+	result, err := h.passwordUseCase.AddExistingToGroup(c.Request.Context(), userID, groupID, req)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+	response.Created(c, "password added to group successfully", result)
+}
+
 func (h *GroupHandler) ListPasswords(c *gin.Context) {
 	userID, _, err := h.identity(c)
 	if err != nil {

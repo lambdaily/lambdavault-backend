@@ -24,6 +24,7 @@ type PasswordUseCase interface {
 	// Group vault operations. All of them resolve the caller's role inside the
 	// group and enforce the permission flags configured by the admin.
 	CreateInGroup(ctx context.Context, userID, groupID uuid.UUID, req dto.CreateGroupPasswordRequest) (*dto.PasswordResponse, error)
+	AddExistingToGroup(ctx context.Context, userID, groupID uuid.UUID, req dto.AddExistingGroupPasswordRequest) (*dto.PasswordResponse, error)
 	GetGroupPassword(ctx context.Context, userID, groupID, passwordID uuid.UUID) (*dto.PasswordWithSecretResponse, error)
 	ListGroup(ctx context.Context, userID, groupID uuid.UUID, query string) (*dto.PasswordListResponse, error)
 	UpdateGroupPassword(ctx context.Context, userID, groupID, passwordID uuid.UUID, req dto.UpdatePasswordRequest) (*dto.PasswordResponse, error)
@@ -160,6 +161,28 @@ func (uc *passwordUseCase) CreateInGroup(ctx context.Context, userID, groupID uu
 		req.Category,
 	)
 	if err := uc.passwordRepo.Create(ctx, password); err != nil {
+		return nil, err
+	}
+	return uc.toResponse(password), nil
+}
+
+func (uc *passwordUseCase) AddExistingToGroup(ctx context.Context, userID, groupID uuid.UUID, req dto.AddExistingGroupPasswordRequest) (*dto.PasswordResponse, error) {
+	group, role, err := uc.requireGroupAccess(ctx, userID, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if !group.CanCreatePasswords(role) {
+		return nil, domainErrors.ErrInsufficientGroupRole
+	}
+
+	password, err := uc.passwordRepo.FindByIDAndUserID(ctx, req.PasswordID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	password.GroupID = &groupID
+	password.UserID = userID
+	if err := uc.passwordRepo.Update(ctx, password); err != nil {
 		return nil, err
 	}
 	return uc.toResponse(password), nil

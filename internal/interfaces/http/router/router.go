@@ -146,6 +146,7 @@ func (r *Router) setupProtectedRoutes() {
 
 			groups.GET("/:id/passwords", groupHandler.ListPasswords)
 			groups.POST("/:id/passwords", groupHandler.CreatePassword)
+			groups.POST("/:id/passwords/existing", groupHandler.AddExistingPassword)
 			groups.GET("/:id/passwords/:passwordId", groupHandler.GetPassword)
 			groups.PUT("/:id/passwords/:passwordId", groupHandler.UpdatePassword)
 			groups.DELETE("/:id/passwords/:passwordId", groupHandler.DeletePassword)
