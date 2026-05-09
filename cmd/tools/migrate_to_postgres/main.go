@@ -26,6 +26,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/lambdavault/api/internal/domain/entity"
+	dbpkg "github.com/lambdavault/api/internal/infrastructure/persistence/database"
 )
 
 func main() {
@@ -57,6 +58,7 @@ func main() {
 		&entity.PasswordGroup{},
 		&entity.GroupMember{},
 		&entity.Password{},
+		&entity.PasswordGroupShare{},
 	); err != nil {
 		exit("failed to migrate postgres schema: %v", err)
 	}
@@ -75,6 +77,15 @@ func main() {
 	}
 	if err := copyTable[entity.Password](src, dst, "passwords", *dryRun, true); err != nil {
 		exit("%v", err)
+	}
+	if err := copyTable[entity.PasswordGroupShare](src, dst, "password_group_shares", *dryRun, false); err != nil {
+		exit("%v", err)
+	}
+
+	if !*dryRun {
+		if err := dbpkg.BackfillPasswordGroupShares(dst); err != nil {
+			exit("failed to backfill password-group shares: %v", err)
+		}
 	}
 
 	if *dryRun {

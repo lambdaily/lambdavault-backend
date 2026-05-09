@@ -7,8 +7,10 @@ import (
 )
 
 type Password struct {
-	ID                uuid.UUID  `gorm:"type:uuid;primaryKey"`
-	UserID            uuid.UUID  `gorm:"type:uuid;index;not null"`
+	ID     uuid.UUID `gorm:"type:uuid;primaryKey"`
+	UserID uuid.UUID `gorm:"type:uuid;index;not null"`
+	// GroupID is a deprecated legacy field from the old model where a password
+	// could belong to exactly one group. New code uses PasswordGroupShare.
 	GroupID           *uuid.UUID `gorm:"type:uuid;index"`
 	SiteName          string     `gorm:"not null"`
 	SiteURL           string
@@ -20,14 +22,18 @@ type Password struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 
-	User  *User          `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
-	Group *PasswordGroup `gorm:"foreignKey:GroupID;constraint:OnDelete:CASCADE"`
+	User   *User                 `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
+	Group  *PasswordGroup        `gorm:"foreignKey:GroupID;constraint:OnDelete:CASCADE"`
+	Shares []*PasswordGroupShare `gorm:"foreignKey:PasswordID;constraint:OnDelete:CASCADE"`
 }
 
-// IsShared reports whether the password belongs to a shared group rather than
-// to a single user's private vault.
+// IsShared reports whether the password is shared with at least one group.
+//
+// In the new model that information lives in PasswordGroupShare rows. We also
+// check the deprecated GroupID field so older rows behave correctly before the
+// one-time migration clears it.
 func (p *Password) IsShared() bool {
-	return p.GroupID != nil
+	return p.GroupID != nil || len(p.Shares) > 0
 }
 
 func NewPassword(userID uuid.UUID, siteName, siteURL, username, encryptedPassword, iv, notes, category string) *Password {
@@ -46,13 +52,8 @@ func NewPassword(userID uuid.UUID, siteName, siteURL, username, encryptedPasswor
 	}
 }
 
-// NewGroupPassword creates a password that belongs to a shared group. UserID
-// records the creator (for auditing); GroupID controls access.
-func NewGroupPassword(creatorID, groupID uuid.UUID, siteName, siteURL, username, encryptedPassword, iv, notes, category string) *Password {
-	p := NewPassword(creatorID, siteName, siteURL, username, encryptedPassword, iv, notes, category)
-	p.GroupID = &groupID
-	return p
-}
+// Shared passwords are modeled via PasswordGroupShare. To create one,
+// create a regular Password and then create one or more shares for it.
 
 func (p *Password) TableName() string {
 	return "passwords"

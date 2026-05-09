@@ -23,6 +23,9 @@ type PasswordUseCase interface {
 
 	// Group vault operations. All of them resolve the caller's role inside the
 	// group and enforce the permission flags configured by the admin.
+	//
+	// In the reference-based sharing model, passwords remain owned by a user and
+	// groups gain access through share rows rather than duplicated password data.
 	CreateInGroup(ctx context.Context, userID, groupID uuid.UUID, req dto.CreateGroupPasswordRequest) (*dto.PasswordResponse, error)
 	AddExistingToGroup(ctx context.Context, userID, groupID uuid.UUID, req dto.AddExistingGroupPasswordRequest) (*dto.PasswordResponse, error)
 	GetGroupPassword(ctx context.Context, userID, groupID, passwordID uuid.UUID) (*dto.PasswordWithSecretResponse, error)
@@ -149,9 +152,8 @@ func (uc *passwordUseCase) CreateInGroup(ctx context.Context, userID, groupID uu
 		return nil, domainErrors.ErrEncryptionFailed
 	}
 
-	password := entity.NewGroupPassword(
+	password := entity.NewPassword(
 		userID,
-		groupID,
 		req.SiteName,
 		req.SiteURL,
 		req.Username,
@@ -161,6 +163,10 @@ func (uc *passwordUseCase) CreateInGroup(ctx context.Context, userID, groupID uu
 		req.Category,
 	)
 	if err := uc.passwordRepo.Create(ctx, password); err != nil {
+		return nil, err
+	}
+	if err := uc.passwordRepo.ShareWithGroup(ctx, password.ID, groupID, userID); err != nil {
+		_ = uc.passwordRepo.Delete(ctx, password.ID)
 		return nil, err
 	}
 	return uc.toResponse(password), nil
@@ -179,10 +185,7 @@ func (uc *passwordUseCase) AddExistingToGroup(ctx context.Context, userID, group
 	if err != nil {
 		return nil, err
 	}
-
-	password.GroupID = &groupID
-	password.UserID = userID
-	if err := uc.passwordRepo.Update(ctx, password); err != nil {
+	if err := uc.passwordRepo.ShareWithGroup(ctx, password.ID, groupID, userID); err != nil {
 		return nil, err
 	}
 	return uc.toResponse(password), nil
@@ -192,12 +195,9 @@ func (uc *passwordUseCase) GetGroupPassword(ctx context.Context, userID, groupID
 	if _, _, err := uc.requireGroupAccess(ctx, userID, groupID); err != nil {
 		return nil, err
 	}
-	password, err := uc.passwordRepo.FindByID(ctx, passwordID)
+	password, err := uc.passwordRepo.FindByIDAndGroupID(ctx, passwordID, groupID)
 	if err != nil {
 		return nil, err
-	}
-	if password.GroupID == nil || *password.GroupID != groupID {
-		return nil, domainErrors.ErrPasswordNotFound
 	}
 
 	decrypted, err := uc.encryptor.Decrypt(password.EncryptedPassword, password.IV)
@@ -237,12 +237,9 @@ func (uc *passwordUseCase) UpdateGroupPassword(ctx context.Context, userID, grou
 	if !group.CanEditPasswords(role) {
 		return nil, domainErrors.ErrInsufficientGroupRole
 	}
-	password, err := uc.passwordRepo.FindByID(ctx, passwordID)
+	password, err := uc.passwordRepo.FindByIDAndGroupID(ctx, passwordID, groupID)
 	if err != nil {
 		return nil, err
-	}
-	if password.GroupID == nil || *password.GroupID != groupID {
-		return nil, domainErrors.ErrPasswordNotFound
 	}
 
 	encryptedPassword, iv, err := uc.encryptor.Encrypt(req.Password)
@@ -264,14 +261,11 @@ func (uc *passwordUseCase) DeleteGroupPassword(ctx context.Context, userID, grou
 	if !group.CanDeletePasswords(role) {
 		return domainErrors.ErrInsufficientGroupRole
 	}
-	password, err := uc.passwordRepo.FindByID(ctx, passwordID)
+	password, err := uc.passwordRepo.FindByIDAndGroupID(ctx, passwordID, groupID)
 	if err != nil {
 		return err
 	}
-	if password.GroupID == nil || *password.GroupID != groupID {
-		return domainErrors.ErrPasswordNotFound
-	}
-	return uc.passwordRepo.Delete(ctx, passwordID)
+	return uc.passwordRepo.UnshareFromGroup(ctx, password.ID, groupID)
 }
 
 // requireGroupAccess loads the group and resolves the caller's role,

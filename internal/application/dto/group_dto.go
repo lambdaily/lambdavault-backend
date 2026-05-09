@@ -52,8 +52,8 @@ type CreateGroupPasswordRequest struct {
 	Category string `json:"category" validate:"omitempty,max=100"`
 }
 
-// AddExistingGroupPasswordRequest moves an already-created personal password
-// into a shared group so it does not have to be recreated manually.
+// AddExistingGroupPasswordRequest shares an already-created personal password
+// with a group by reference so it remains in the personal vault too.
 type AddExistingGroupPasswordRequest struct {
 	PasswordID uuid.UUID `json:"password_id" validate:"required"`
 }
