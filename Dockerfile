@@ -7,22 +7,20 @@ FROM golang:1.25-bookworm AS builder
 
 WORKDIR /src
 
-# Cache go modules across builds.
+# Cache go modules using Docker layer reuse across builds.
 COPY go.mod go.sum ./
-RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod \
-    --mount=type=cache,id=gobuildcache,target=/root/.cache/go-build \
-    go mod download
+RUN go mod download
 
 COPY . .
 
 # CGO is enabled because the SQLite driver requires it. The image still
 # works in production with DB_DRIVER=postgres (sqlite is just dead code in
 # that path) and we publish a small distroless runtime image so the build
-# overhead is acceptable. Strip symbols and disable DWARF to slim the
-# binary; -trimpath removes local paths from the binary.
-RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod \
-    --mount=type=cache,id=gobuildcache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 GOOS=linux go build \
+# overhead is acceptable. Railway requires service-specific cache mount ids,
+# so we rely on regular Docker layer caching here for portability. Strip
+# symbols and disable DWARF to slim the binary; -trimpath removes local
+# paths from the binary.
+RUN CGO_ENABLED=1 GOOS=linux go build \
         -trimpath \
         -ldflags="-s -w" \
         -o /out/lambdavault ./cmd/api
