@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/lambdavault/api/internal/infrastructure/config"
-	"github.com/lambdavault/api/internal/infrastructure/persistence/sqlite"
+	"github.com/lambdavault/api/internal/infrastructure/persistence/database"
 	"github.com/lambdavault/api/internal/infrastructure/security"
 	"github.com/lambdavault/api/internal/interfaces/http/router"
 )
@@ -23,21 +23,30 @@ func run() error {
 		return err
 	}
 
-	if cfg.IsProduction() {
-		if err := cfg.Validate(); err != nil {
-			return err
-		}
+	// Always validate. Insecure defaults must never reach a deployed binary,
+	// not even by accident in a "development" environment.
+	if err := cfg.Validate(); err != nil {
+		return err
 	}
 
-	db, err := sqlite.NewDatabase(cfg.Database.Path, cfg.IsProduction())
+	dsn := cfg.Database.Path
+	if cfg.Database.Driver == "postgres" {
+		dsn = cfg.Database.DSN
+	}
+
+	db, err := database.New(database.Config{
+		Driver:       database.Driver(cfg.Database.Driver),
+		DSN:          dsn,
+		IsProduction: cfg.IsProduction(),
+	})
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
-	userRepo := sqlite.NewUserRepository(db.DB)
-	passwordRepo := sqlite.NewPasswordRepository(db.DB)
-	groupRepo := sqlite.NewPasswordGroupRepository(db.DB)
+	userRepo := database.NewUserRepository(db.DB)
+	passwordRepo := database.NewPasswordRepository(db.DB)
+	groupRepo := database.NewPasswordGroupRepository(db.DB)
 	hasher := security.NewArgon2Hasher()
 	jwtService := security.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiration)
 
@@ -46,10 +55,10 @@ func run() error {
 		return err
 	}
 
-	r := router.New(cfg, userRepo, passwordRepo, groupRepo, jwtService, hasher, encryptor)
+	r := router.New(cfg, userRepo, passwordRepo, groupRepo, jwtService, hasher, encryptor, db)
 	r.Setup()
 
-	log.Printf("🔐 %s starting on port %s [%s]", cfg.App.Name, cfg.App.Port, cfg.App.Env)
+	log.Printf("🔐 %s starting on port %s [%s] driver=%s", cfg.App.Name, cfg.App.Port, cfg.App.Env, cfg.Database.Driver)
 
 	return r.Run()
 }

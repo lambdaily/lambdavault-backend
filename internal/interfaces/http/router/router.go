@@ -6,6 +6,7 @@ import (
 	"github.com/lambdavault/api/internal/application/usecase"
 	"github.com/lambdavault/api/internal/domain/repository"
 	"github.com/lambdavault/api/internal/infrastructure/config"
+	"github.com/lambdavault/api/internal/infrastructure/persistence/database"
 	"github.com/lambdavault/api/internal/infrastructure/security"
 	"github.com/lambdavault/api/internal/interfaces/http/handler"
 	"github.com/lambdavault/api/internal/interfaces/http/middleware"
@@ -16,6 +17,7 @@ import (
 type Router struct {
 	engine         *gin.Engine
 	config         *config.Config
+	db             *database.Database
 	userRepo       repository.UserRepository
 	passwordRepo   repository.PasswordRepository
 	groupRepo      repository.PasswordGroupRepository
@@ -33,6 +35,7 @@ func New(
 	jwtService security.JWTService,
 	hasher security.Hasher,
 	encryptor security.Encryptor,
+	db *database.Database,
 ) *Router {
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
@@ -40,7 +43,9 @@ func New(
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
-	engine.Use(middleware.CORS())
+	engine.Use(middleware.SecurityHeaders(cfg.IsProduction()))
+	engine.Use(middleware.CORS(cfg.CORS.Origins, cfg.IsProduction()))
+	engine.Use(middleware.RateLimit(cfg.RateLimit.RPS, cfg.RateLimit.Burst))
 
 	if cfg.IsDevelopment() {
 		engine.Use(gin.Logger())
@@ -49,6 +54,7 @@ func New(
 	return &Router{
 		engine:         engine,
 		config:         cfg,
+		db:             db,
 		userRepo:       userRepo,
 		passwordRepo:   passwordRepo,
 		groupRepo:      groupRepo,
@@ -74,6 +80,12 @@ func (r *Router) setupHealthRoutes() {
 	})
 
 	r.engine.GET("/ready", func(c *gin.Context) {
+		if r.db != nil {
+			if err := r.db.Ping(); err != nil {
+				c.AbortWithStatusJSON(503, gin.H{"status": "not_ready", "error": err.Error()})
+				return
+			}
+		}
 		response.OK(c, gin.H{"status": "ready"})
 	})
 }
@@ -83,6 +95,7 @@ func (r *Router) setupAuthRoutes() {
 	authHandler := handler.NewAuthHandler(authUseCase, validator.New())
 
 	auth := r.engine.Group("/api/v1/auth")
+	auth.Use(middleware.RateLimit(r.config.RateLimit.AuthRPS, r.config.RateLimit.AuthBurst))
 	{
 		auth.POST("/register", authHandler.Register)
 		auth.POST("/login", authHandler.Login)
