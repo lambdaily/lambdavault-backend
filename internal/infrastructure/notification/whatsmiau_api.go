@@ -60,6 +60,11 @@ func (n *WhatsmiauAPINotifier) NotifyPasswordShared(ctx context.Context, event a
 	return n.sendToMany(ctx, candidateRecipients(event.RecipientPhones, []string{n.defaultPhone}), message)
 }
 
+func (n *WhatsmiauAPINotifier) NotifyGroupMemberAdded(ctx context.Context, event appservice.GroupMemberAddedEvent) error {
+	message := formatGroupMemberAddedMessage(event)
+	return n.sendToMany(ctx, candidateRecipients(event.RecipientPhones, []string{event.MemberPhone}, []string{n.defaultPhone}), message)
+}
+
 func (n *WhatsmiauAPINotifier) sendToMany(ctx context.Context, numbers []string, text string) error {
 	if !n.Enabled() || len(numbers) == 0 || strings.TrimSpace(text) == "" {
 		return nil
@@ -168,6 +173,18 @@ func formatPasswordSharedMessage(event appservice.PasswordSharedEvent) string {
 	}
 	if strings.TrimSpace(event.Category) != "" {
 		lines = append(lines, "Categoría: "+event.Category)
+	}
+	lines = append(lines, "Fecha: "+event.OccurredAt.Format(time.RFC3339))
+	return strings.Join(lines, "\n")
+}
+
+func formatGroupMemberAddedMessage(event appservice.GroupMemberAddedEvent) string {
+	lines := []string{
+		"👥 LambdaVault",
+		"Te agregaron a un grupo de contraseñas.",
+		"Grupo: " + safe(event.GroupName),
+		"Rol: " + safe(event.MemberRole),
+		"Agregado por: " + safe(event.InvitedByEmail),
 	}
 	lines = append(lines, "Fecha: "+event.OccurredAt.Format(time.RFC3339))
 	return strings.Join(lines, "\n")

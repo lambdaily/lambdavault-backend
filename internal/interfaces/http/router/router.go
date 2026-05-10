@@ -113,7 +113,7 @@ func (r *Router) setupProtectedRoutes() {
 	passwordUseCase := usecase.NewPasswordUseCase(r.passwordRepo, r.groupRepo, r.userRepo, r.encryptor, r.notifier)
 	passwordHandler := handler.NewPasswordHandler(passwordUseCase, validator.New())
 
-	groupUseCase := usecase.NewGroupUseCase(r.groupRepo, r.userRepo)
+	groupUseCase := usecase.NewGroupUseCase(r.groupRepo, r.userRepo, r.notifier)
 	groupHandler := handler.NewGroupHandler(groupUseCase, passwordUseCase, validator.New())
 
 	generatorUseCase := usecase.NewGeneratorUseCase()

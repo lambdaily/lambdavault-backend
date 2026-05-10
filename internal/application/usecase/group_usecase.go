@@ -2,10 +2,13 @@ package usecase
 
 import (
 	"context"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
+	appservice "github.com/lambdavault/api/internal/application/service"
 	"github.com/lambdavault/api/internal/application/dto"
 	"github.com/lambdavault/api/internal/domain/entity"
 	domainErrors "github.com/lambdavault/api/internal/domain/errors"
@@ -36,12 +39,17 @@ type GroupUseCase interface {
 type groupUseCase struct {
 	groupRepo repository.PasswordGroupRepository
 	userRepo  repository.UserRepository
+	notifier  appservice.Notifier
 }
 
-func NewGroupUseCase(groupRepo repository.PasswordGroupRepository, userRepo repository.UserRepository) GroupUseCase {
+func NewGroupUseCase(groupRepo repository.PasswordGroupRepository, userRepo repository.UserRepository, notifier appservice.Notifier) GroupUseCase {
+	if notifier == nil {
+		notifier = appservice.NoopNotifier{}
+	}
 	return &groupUseCase{
 		groupRepo: groupRepo,
 		userRepo:  userRepo,
+		notifier:  notifier,
 	}
 }
 
@@ -67,7 +75,7 @@ func (uc *groupUseCase) Create(ctx context.Context, ownerID uuid.UUID, ownerEmai
 	// Invite extra members if provided. Errors here are non-fatal in the sense
 	// that they are returned but the group is already created.
 	for _, invite := range req.Members {
-		if _, err := uc.inviteOne(ctx, group.ID, ownerID, ownerEmail, invite); err != nil {
+		if _, err := uc.inviteOne(ctx, group, ownerID, ownerEmail, invite); err != nil {
 			return nil, err
 		}
 	}
@@ -151,7 +159,7 @@ func (uc *groupUseCase) AddMembers(ctx context.Context, userID, groupID uuid.UUI
 
 	added := make([]dto.GroupMemberResponse, 0, len(req.Members))
 	for _, invite := range req.Members {
-		member, err := uc.inviteOne(ctx, group.ID, userID, owner.Email, invite)
+		member, err := uc.inviteOne(ctx, group, userID, owner.Email, invite)
 		if err != nil {
 			return nil, err
 		}
@@ -251,7 +259,7 @@ func (uc *groupUseCase) Leave(ctx context.Context, userID, groupID uuid.UUID) er
 // to a registered user the membership is created in the active state;
 // otherwise it is stored as a pending invitation that will be activated when
 // that user signs up.
-func (uc *groupUseCase) inviteOne(ctx context.Context, groupID, inviterID uuid.UUID, inviterEmail string, invite dto.GroupInviteEntry) (*entity.GroupMember, error) {
+func (uc *groupUseCase) inviteOne(ctx context.Context, group *entity.PasswordGroup, inviterID uuid.UUID, inviterEmail string, invite dto.GroupInviteEntry) (*entity.GroupMember, error) {
 	role := entity.GroupRole(invite.Role)
 	if !role.IsValid() {
 		return nil, domainErrors.ErrInvalidGroupRole
@@ -262,7 +270,7 @@ func (uc *groupUseCase) inviteOne(ctx context.Context, groupID, inviterID uuid.U
 		return nil, domainErrors.ErrCannotInviteSelf
 	}
 
-	if existing, err := uc.groupRepo.FindMemberByGroupAndEmail(ctx, groupID, email); err == nil {
+	if existing, err := uc.groupRepo.FindMemberByGroupAndEmail(ctx, group.ID, email); err == nil {
 		_ = existing
 		return nil, domainErrors.ErrGroupMemberExists
 	} else if !domainErrors.Is(err, domainErrors.ErrGroupMemberNotFound) {
@@ -276,11 +284,36 @@ func (uc *groupUseCase) inviteOne(ctx context.Context, groupID, inviterID uuid.U
 		return nil, err
 	}
 
-	member := entity.NewGroupMember(groupID, inviterID, email, role, user)
+	member := entity.NewGroupMember(group.ID, inviterID, email, role, user)
 	if err := uc.groupRepo.AddMember(ctx, member); err != nil {
 		return nil, err
 	}
+
+	uc.notifyGroupMemberAdded(ctx, group, inviterID, inviterEmail, member, user)
 	return member, nil
+}
+
+func (uc *groupUseCase) notifyGroupMemberAdded(ctx context.Context, group *entity.PasswordGroup, inviterID uuid.UUID, inviterEmail string, member *entity.GroupMember, user *entity.User) {
+	event := appservice.GroupMemberAddedEvent{
+		GroupID:         group.ID,
+		GroupName:       group.Name,
+		MemberEmail:     member.Email,
+		MemberRole:      string(member.Role),
+		InvitedByUserID: inviterID,
+		InvitedByEmail:  inviterEmail,
+		OccurredAt:      time.Now(),
+		RecipientEmails: []string{member.Email},
+	}
+	if user != nil {
+		event.MemberUserID = user.ID
+		event.MemberPhone = user.Phone
+		if user.Phone != "" {
+			event.RecipientPhones = []string{user.Phone}
+		}
+	}
+	if err := uc.notifier.NotifyGroupMemberAdded(ctx, event); err != nil {
+		log.Printf("warn: group-member-added notification failed: %v", err)
+	}
 }
 
 // requireMember loads the group and resolves the caller's effective role.

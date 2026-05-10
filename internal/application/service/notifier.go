@@ -14,6 +14,7 @@ import (
 type Notifier interface {
 	NotifyPasswordCreated(ctx context.Context, event PasswordCreatedEvent) error
 	NotifyPasswordShared(ctx context.Context, event PasswordSharedEvent) error
+	NotifyGroupMemberAdded(ctx context.Context, event GroupMemberAddedEvent) error
 }
 
 type PasswordCreatedEvent struct {
@@ -46,6 +47,20 @@ type PasswordSharedEvent struct {
 	RecipientPhones []string  `json:"recipient_phones"`
 }
 
+type GroupMemberAddedEvent struct {
+	GroupID         uuid.UUID `json:"group_id"`
+	GroupName       string    `json:"group_name"`
+	MemberUserID    uuid.UUID `json:"member_user_id,omitempty"`
+	MemberEmail     string    `json:"member_email"`
+	MemberPhone     string    `json:"member_phone,omitempty"`
+	MemberRole      string    `json:"member_role"`
+	InvitedByUserID uuid.UUID `json:"invited_by_user_id"`
+	InvitedByEmail  string    `json:"invited_by_email"`
+	OccurredAt      time.Time `json:"occurred_at"`
+	RecipientEmails []string  `json:"recipient_emails"`
+	RecipientPhones []string  `json:"recipient_phones"`
+}
+
 type NoopNotifier struct{}
 
 func (NoopNotifier) NotifyPasswordCreated(context.Context, PasswordCreatedEvent) error {
@@ -53,5 +68,9 @@ func (NoopNotifier) NotifyPasswordCreated(context.Context, PasswordCreatedEvent)
 }
 
 func (NoopNotifier) NotifyPasswordShared(context.Context, PasswordSharedEvent) error {
+	return nil
+}
+
+func (NoopNotifier) NotifyGroupMemberAdded(context.Context, GroupMemberAddedEvent) error {
 	return nil
 }
